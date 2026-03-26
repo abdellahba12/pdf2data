@@ -18,9 +18,20 @@ export interface ExtractedInvoiceData {
   line_items: LineItem[]
 }
 
-const EXTRACTION_PROMPT = `You are an expert invoice data extractor. Extract structured invoice data from the following text.
+const EXTRACTION_PROMPT = `You are an expert invoice and delivery note data extractor for Spanish businesses. Your job is to extract EVERY piece of data from the document text below.
 
-Return ONLY a valid JSON object with exactly this schema. Do not include any explanation or markdown:
+CRITICAL RULES:
+- ALWAYS look for dates. Invoices ALWAYS have a date. Look for patterns like "dd/mm/yyyy", "dd.mm.yyyy", "dd-mm-yyyy", "yyyy-mm-dd", or words like "Fecha", "Data", "Date", "Emision". Convert ANY date found to YYYY-MM-DD format.
+- ALWAYS calculate tax. Spanish invoices use IVA (usually 21%). If you see "IVA" anywhere, extract the amount. If you see a subtotal (base imponible) and a total, calculate: tax = total - subtotal. If you only see a total and no tax info, assume 21% IVA and calculate: tax = total * 21 / 121.
+- For vendor_name: extract the company or person name that ISSUED the document (the supplier/vendor), NOT the recipient.
+- For invoice_number: look for "Factura", "Fra.", "Num", "N°", "Albaran", "Pedido", or any reference number.
+- For currency: if you see "€" or "EUR" or amounts with comma as decimal separator, use "EUR".
+- For line_items: extract EVERY line of products/services. Each must have description, quantity (default 1 if not specified), unit_price, and total.
+- NEVER return null for invoice_date if there is ANY date in the document.
+- NEVER return null for tax_amount - calculate it if not explicitly shown.
+- NEVER return null for total_amount if there are ANY monetary amounts.
+
+Return ONLY a valid JSON object with this schema (no explanation, no markdown):
 
 {
   "vendor_name": "string or null",
@@ -28,7 +39,7 @@ Return ONLY a valid JSON object with exactly this schema. Do not include any exp
   "invoice_date": "YYYY-MM-DD or null",
   "due_date": "YYYY-MM-DD or null",
   "total_amount": number or null,
-  "currency": "3-letter currency code or null",
+  "currency": "EUR",
   "tax_amount": number or null,
   "line_items": [
     {
@@ -40,21 +51,11 @@ Return ONLY a valid JSON object with exactly this schema. Do not include any exp
   ]
 }
 
-Rules:
-- All dates must be in YYYY-MM-DD format
-- All amounts must be numbers (not strings)
-- currency should be ISO 4217 (e.g., EUR, USD, GBP)
-- If a field cannot be found, use null
-- line_items should be an empty array if no line items found
-- Return ONLY the JSON object, nothing else
-
 Document text:
 `
 
-// Helper: wait ms
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
 
-// Helper: call Gemini with automatic retry on 429
 async function callGeminiWithRetry(
   model: any,
   prompt: string | any[],
@@ -67,7 +68,7 @@ async function callGeminiWithRetry(
     } catch (error: any) {
       const is429 = error?.status === 429 || error?.message?.includes('429')
       if (is429 && attempt < maxRetries) {
-        const waitSec = Math.min(10 * (attempt + 1), 30) // 10s, 20s, 30s
+        const waitSec = Math.min(10 * (attempt + 1), 30)
         console.log(`Gemini rate limit hit, retrying in ${waitSec}s (attempt ${attempt + 1}/${maxRetries})`)
         await sleep(waitSec * 1000)
         continue
@@ -107,22 +108,36 @@ export async function extractInvoiceDataWithGemini(
   return validateAndClean(parsed)
 }
 
-// Export the retry helper so style-analyzer can use it too
 export { callGeminiWithRetry }
 
 function validateAndClean(data: ExtractedInvoiceData): ExtractedInvoiceData {
+  let totalAmount = typeof data.total_amount === 'number' ? data.total_amount : null
+  let taxAmount = typeof data.tax_amount === 'number' ? data.tax_amount : null
+
+  // If we have total but no tax, calculate 21% IVA
+  if (totalAmount && !taxAmount) {
+    taxAmount = Math.round((totalAmount * 21 / 121) * 100) / 100
+  }
+
+  // If we have line items but no total, sum them
+  if (!totalAmount && Array.isArray(data.line_items) && data.line_items.length > 0) {
+    const subtotal = data.line_items.reduce((sum, item) => sum + (Number(item.total) || 0), 0)
+    taxAmount = Math.round((subtotal * 0.21) * 100) / 100
+    totalAmount = Math.round((subtotal + taxAmount) * 100) / 100
+  }
+
   return {
     vendor_name: typeof data.vendor_name === 'string' ? data.vendor_name : null,
     invoice_number: typeof data.invoice_number === 'string' ? data.invoice_number : null,
     invoice_date: isValidDate(data.invoice_date) ? data.invoice_date : null,
     due_date: isValidDate(data.due_date) ? data.due_date : null,
-    total_amount: typeof data.total_amount === 'number' ? data.total_amount : null,
-    currency: typeof data.currency === 'string' ? data.currency.toUpperCase() : null,
-    tax_amount: typeof data.tax_amount === 'number' ? data.tax_amount : null,
+    total_amount: totalAmount,
+    currency: typeof data.currency === 'string' ? data.currency.toUpperCase() : 'EUR',
+    tax_amount: taxAmount,
     line_items: Array.isArray(data.line_items)
       ? data.line_items.map((item) => ({
           description: String(item.description || ''),
-          quantity: Number(item.quantity) || 0,
+          quantity: Number(item.quantity) || 1,
           unit_price: Number(item.unit_price) || 0,
           total: Number(item.total) || 0,
         }))
