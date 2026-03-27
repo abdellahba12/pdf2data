@@ -16,6 +16,7 @@ export async function generateExcel(data: ExtractedInvoiceData, fileName: string
 
   const summaryData = [
     { field: 'Vendor Name', value: data.vendor_name || '' },
+    { field: 'Client Name', value: data.client_name || '' },
     { field: 'Invoice Number', value: data.invoice_number || '' },
     { field: 'Invoice Date', value: data.invoice_date || '' },
     { field: 'Due Date', value: data.due_date || '' },
@@ -62,6 +63,7 @@ export function generateCSV(data: ExtractedInvoiceData): string {
   const lines: string[] = []
   lines.push('Field,Value')
   lines.push(`Vendor Name,${csvEscape(data.vendor_name || '')}`)
+  lines.push(`Client Name,${csvEscape(data.client_name || '')}`)
   lines.push(`Invoice Number,${csvEscape(data.invoice_number || '')}`)
   lines.push(`Invoice Date,${csvEscape(data.invoice_date || '')}`)
   lines.push(`Due Date,${csvEscape(data.due_date || '')}`)

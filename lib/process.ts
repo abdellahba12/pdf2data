@@ -7,6 +7,7 @@ import { extractWithRules, PartialInvoiceData } from './extract-rules'
 function mergeData(rules: PartialInvoiceData, ai: ExtractedInvoiceData): ExtractedInvoiceData {
   return {
     vendor_name: rules.vendor_name || ai.vendor_name,
+    client_name: rules.client_name || ai.client_name,
     invoice_number: rules.invoice_number || ai.invoice_number,
     invoice_date: rules.invoice_date || ai.invoice_date,
     due_date: rules.due_date || ai.due_date,
@@ -45,16 +46,16 @@ export async function processDocument(documentId: string): Promise<void> {
     const rulesData = extractWithRules(text)
     console.log('Rules extraction:', JSON.stringify(rulesData, null, 2))
 
-    // Step 3: AI extraction (for line items and missing fields)
+    // Step 3: AI extraction (multimodal: sends both text and original file for better accuracy)
     let aiData: ExtractedInvoiceData
     try {
-      aiData = await extractInvoiceDataWithGemini(text)
+      aiData = await extractInvoiceDataWithGemini(text, filePath)
       console.log('Gemini extraction:', JSON.stringify(aiData, null, 2))
     } catch (error) {
       console.error('Gemini failed, using rules only:', error)
       // If Gemini fails (rate limit etc), use rules data only
       aiData = {
-        vendor_name: null, invoice_number: null, invoice_date: null,
+        vendor_name: null, client_name: null, invoice_number: null, invoice_date: null,
         due_date: null, total_amount: null, currency: 'EUR',
         tax_amount: null, line_items: [],
       }

@@ -43,7 +43,6 @@ export function generateInvoiceHTML(
     subtotal = totalAmount - taxAmount
     if (subtotal > 0) taxRate = Math.round((taxAmount / subtotal) * 100)
   } else if (totalAmount && !taxAmount) {
-    // Assume total = subtotal (no IVA extracted means it was already calculated)
     subtotal = totalAmount
     taxAmount = 0
   }
@@ -59,34 +58,43 @@ export function generateInvoiceHTML(
       <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;text-align:right;font-size:11px;">${fmt(item.total, currency)}</td>
     </tr>`).join('')
 
-  // Bars - ONLY if the analyzed style says so
+  // Bars
   const topBar = style.hasTopBar ? `<div style="height:6px;background:${pc};"></div>` : ''
   const bottomBar = style.hasBottomBar ? `<div style="height:6px;background:${pc};"></div>` : ''
 
-  // Logo
+  // Logo — position-aware
   const logoHTML = company.logoUrl
     ? `<img src="${company.logoUrl}" style="max-height:60px;max-width:180px;object-fit:contain;" alt="Logo" />`
     : `<div style="font-size:20px;font-weight:700;color:${pc};">${company.name}</div>`
 
-  const clientName = data.vendor_name || ''
+  const logoAlign = style.logoPosition === 'right' ? 'right'
+    : style.logoPosition === 'center' ? 'center'
+    : 'left'
+
+  // Client name: use extracted client_name (who the invoice is addressed TO)
+  const clientName = data.client_name || ''
+
   const displayInvoiceNumber = invoiceNumber || data.invoice_number || '-'
 
   // Language-aware labels
   const lang = style.language || 'es'
   const labels = {
-    desc: lang === 'ca' ? 'Descripció' : 'Descripcion',
-    units: lang === 'ca' ? 'Unitats' : 'Unidades',
-    price: lang === 'ca' ? 'Preu' : 'Precio',
-    payment: lang === 'ca' ? 'Forma pagament:' : 'Forma pago:',
-    reference: 'Referencia',
-    client: 'Client',
-    subtotal: style.subtotalLabel || 'Total parcial',
+    desc: lang === 'ca' ? 'Descripció' : lang === 'en' ? 'Description' : 'Descripcion',
+    units: lang === 'ca' ? 'Unitats' : lang === 'en' ? 'Units' : 'Unidades',
+    price: lang === 'ca' ? 'Preu' : lang === 'en' ? 'Price' : 'Precio',
+    payment: lang === 'ca' ? 'Forma pagament:' : lang === 'en' ? 'Payment method:' : 'Forma pago:',
+    reference: lang === 'ca' ? 'Referència' : lang === 'en' ? 'Reference' : 'Referencia',
+    client: lang === 'ca' ? 'Client' : lang === 'en' ? 'Client' : 'Cliente',
+    subtotal: style.subtotalLabel || 'Base imponible',
     tax: style.taxLabel || 'IVA',
     total: style.totalLabel || 'TOTAL FACTURA',
     title: style.invoiceTitle || 'Factura',
-    dateLabel: 'Data',
-    numLabel: lang === 'ca' ? 'N° de factura' : 'N° de factura',
+    dateLabel: lang === 'ca' ? 'Data' : lang === 'en' ? 'Date' : 'Fecha',
+    numLabel: lang === 'en' ? 'Invoice No.' : 'N° de factura',
+    dueLabel: lang === 'ca' ? 'Venciment' : lang === 'en' ? 'Due date' : 'Vencimiento',
   }
+
+  const footerText = style.footerText || ''
 
   return `<!DOCTYPE html>
 <html lang="${lang}">
@@ -105,10 +113,10 @@ export function generateInvoiceHTML(
   ${topBar}
   <div class="content">
 
-    <!-- HEADER -->
+    <!-- HEADER: logo + invoice title -->
     <table style="margin-bottom:20px;">
       <tr>
-        <td style="width:55%;vertical-align:top;">${logoHTML}</td>
+        <td style="width:55%;vertical-align:top;text-align:${logoAlign};">${logoHTML}</td>
         <td style="width:45%;text-align:right;vertical-align:top;">
           <div style="font-size:32px;color:#bbb;font-weight:300;letter-spacing:2px;font-family:Georgia,serif;">${labels.title}</div>
         </td>
@@ -134,6 +142,10 @@ export function generateInvoiceHTML(
               <td style="padding:3px 12px;text-align:right;color:${pc};font-weight:600;font-size:11px;border-bottom:1px solid #e0e0e0;">${labels.numLabel}</td>
               <td style="padding:3px 12px;text-align:right;font-size:11px;border-bottom:1px solid #e0e0e0;">${displayInvoiceNumber}</td>
             </tr>
+            ${data.due_date ? `<tr>
+              <td style="padding:3px 12px;text-align:right;color:${pc};font-weight:600;font-size:11px;border-bottom:1px solid #e0e0e0;">${labels.dueLabel}</td>
+              <td style="padding:3px 12px;text-align:right;font-size:11px;border-bottom:1px solid #e0e0e0;">${formatDate(data.due_date)}</td>
+            </tr>` : ''}
           </table>
         </td>
       </tr>
@@ -187,11 +199,7 @@ export function generateInvoiceHTML(
               <td style="padding:4px 8px;text-align:right;font-size:11px;">${fmt(displaySubtotal, currency)}</td>
             </tr>
             <tr>
-              <td style="padding:4px 8px;text-align:left;font-size:11px;color:#555;">${labels.tax}</td>
-              <td style="padding:4px 8px;text-align:right;font-size:11px;">${taxRate},00%</td>
-            </tr>
-            <tr>
-              <td style="padding:4px 8px;text-align:left;font-size:11px;color:#555;">Total ${labels.tax}</td>
+              <td style="padding:4px 8px;text-align:left;font-size:11px;color:#555;">${labels.tax} ${taxRate > 0 ? `${taxRate}%` : ''}</td>
               <td style="padding:4px 8px;text-align:right;font-size:11px;">${fmt(taxAmount, currency)}</td>
             </tr>
             <tr>
@@ -206,9 +214,7 @@ export function generateInvoiceHTML(
   </div>
 
   <!-- FOOTER -->
-  <div style="position:absolute;bottom:20px;left:0;right:0;text-align:center;font-size:9px;color:#999;padding:0 32px;">
-    Inscrita en el Registre Mercantil de Barcelona
-  </div>
+  ${footerText ? `<div style="position:absolute;bottom:20px;left:0;right:0;text-align:center;font-size:9px;color:#999;padding:0 32px;">${footerText}</div>` : ''}
 
   ${bottomBar}
 </div>

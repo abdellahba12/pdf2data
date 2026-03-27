@@ -10,6 +10,7 @@ export interface CompanyStyle {
   fontFamily: string
   hasTopBar: boolean
   hasBottomBar: boolean
+  logoPosition: 'left' | 'right' | 'center'
   invoiceTitle: string
   currencySymbol: string
   dateFormat: string
@@ -17,25 +18,28 @@ export interface CompanyStyle {
   taxLabel: string
   subtotalLabel: string
   totalLabel: string
+  footerText: string
 }
 
-const STYLE_PROMPT = `Analyze this invoice image and extract its visual design style. Return ONLY a valid JSON object with exactly these fields:
+const STYLE_PROMPT = `Analyze this invoice image and extract its exact visual design style with high precision. Return ONLY a valid JSON object:
 
 {
-  "primaryColor": "hex color of main brand color",
-  "accentColor": "hex color of secondary color",
-  "headerBg": "hex color for table header background",
-  "headerText": "hex color of table header text",
+  "primaryColor": "hex color of the main brand color (used in headers, titles, borders)",
+  "accentColor": "hex color of secondary/accent color",
+  "headerBg": "hex color for the line items table header background",
+  "headerText": "hex color of the table header text (white if dark background)",
   "fontFamily": "serif or sans-serif",
-  "hasTopBar": true/false,
-  "hasBottomBar": true/false,
-  "invoiceTitle": "the word used for invoice title",
-  "currencySymbol": "currency symbol used",
-  "dateFormat": "date format observed",
+  "hasTopBar": true/false (is there a colored bar at the very top of the page),
+  "hasBottomBar": true/false (is there a colored bar at the very bottom),
+  "logoPosition": "left, right, or center (where the company logo/name appears in the header)",
+  "invoiceTitle": "exact word used as invoice title (e.g. Factura, Invoice, Albaran)",
+  "currencySymbol": "currency symbol (€, $, £)",
+  "dateFormat": "date format observed (DD/MM/YYYY, DD.MM.YYYY, etc.)",
   "language": "language code: ca, es, en, fr, de, it, pt",
-  "taxLabel": "label for tax",
-  "subtotalLabel": "label for subtotal",
-  "totalLabel": "label for total"
+  "taxLabel": "exact label for tax (IVA, VAT, Tax, etc.)",
+  "subtotalLabel": "exact label for subtotal (Base imponible, Subtotal, Total parcial, etc.)",
+  "totalLabel": "exact label for the grand total (TOTAL FACTURA, Total, etc.)",
+  "footerText": "exact text in the footer of the document (company registration info, etc.) or empty string if none"
 }
 
 Return ONLY the JSON, no explanation.`
@@ -74,8 +78,10 @@ export function getDefaultStyle(): CompanyStyle {
     primaryColor: '#1a2b6b', accentColor: '#cc0000',
     headerBg: '#1a2b6b', headerText: '#ffffff',
     fontFamily: 'sans-serif', hasTopBar: true, hasBottomBar: true,
+    logoPosition: 'left',
     invoiceTitle: 'Factura', currencySymbol: 'EUR',
     dateFormat: 'DD.MM.YYYY', language: 'es',
-    taxLabel: 'IVA', subtotalLabel: 'Total parcial', totalLabel: 'TOTAL FACTURA',
+    taxLabel: 'IVA', subtotalLabel: 'Base imponible', totalLabel: 'TOTAL FACTURA',
+    footerText: '',
   }
 }

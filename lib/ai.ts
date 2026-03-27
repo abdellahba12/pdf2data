@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import fs from 'fs'
 
 export interface LineItem {
   description: string
@@ -9,6 +10,7 @@ export interface LineItem {
 
 export interface ExtractedInvoiceData {
   vendor_name: string | null
+  client_name: string | null
   invoice_number: string | null
   invoice_date: string | null
   due_date: string | null
@@ -18,23 +20,24 @@ export interface ExtractedInvoiceData {
   line_items: LineItem[]
 }
 
-const EXTRACTION_PROMPT = `You are an expert invoice and delivery note data extractor for Spanish businesses. Your job is to extract EVERY piece of data from the document text below.
+const EXTRACTION_PROMPT = `You are an expert invoice and delivery note data extractor for Spanish businesses. Your job is to extract EVERY piece of data from the document.
 
 CRITICAL RULES:
-- ALWAYS look for dates. Invoices ALWAYS have a date. Look for patterns like "dd/mm/yyyy", "dd.mm.yyyy", "dd-mm-yyyy", "yyyy-mm-dd", or words like "Fecha", "Data", "Date", "Emision". Convert ANY date found to YYYY-MM-DD format.
-- ALWAYS calculate tax. Spanish invoices use IVA (usually 21%). If you see "IVA" anywhere, extract the amount. If you see a subtotal (base imponible) and a total, calculate: tax = total - subtotal. If you only see a total and no tax info, assume 21% IVA and calculate: tax = total * 21 / 121.
-- For vendor_name: extract the company or person name that ISSUED the document (the supplier/vendor), NOT the recipient.
-- For invoice_number: look for "Factura", "Fra.", "Num", "N°", "Albaran", "Pedido", or any reference number.
-- For currency: if you see "€" or "EUR" or amounts with comma as decimal separator, use "EUR".
-- For line_items: extract EVERY line of products/services. Each must have description, quantity (default 1 if not specified), unit_price, and total.
-- NEVER return null for invoice_date if there is ANY date in the document.
-- NEVER return null for tax_amount - calculate it if not explicitly shown.
-- NEVER return null for total_amount if there are ANY monetary amounts.
+- For vendor_name: extract the company or person that ISSUED/EMITTED the invoice (the supplier/vendor at the top of the document, with their CIF/NIF).
+- For client_name: extract the company or person the invoice was SENT TO (the buyer/recipient, often after "Cliente:", "A:", "Facturar a:", "Destinatario:", or in a separate "client" section).
+- ALWAYS look for dates. Invoices ALWAYS have a date. Look for "Fecha", "Data", "Date", "Emision", "dd/mm/yyyy", "dd.mm.yyyy". Convert to YYYY-MM-DD.
+- ALWAYS extract tax (IVA). If you see "IVA" extract the amount. If you see subtotal + total, calculate: tax = total - subtotal. If only total visible, assume 21%: tax = total * 21 / 121.
+- For invoice_number: look for "Factura", "Fra.", "Num", "N°", "Albaran", or any reference number.
+- For line_items: extract EVERY product/service line with description, quantity (default 1), unit_price, and total. Look carefully at tables.
+- For currency: "€" or "EUR" or comma decimal separator → "EUR".
+- NEVER return null for invoice_date if ANY date exists.
+- NEVER return null for total_amount if ANY monetary amount exists.
 
-Return ONLY a valid JSON object with this schema (no explanation, no markdown):
+Return ONLY a valid JSON object, no markdown, no explanation:
 
 {
   "vendor_name": "string or null",
+  "client_name": "string or null",
   "invoice_number": "string or null",
   "invoice_date": "YYYY-MM-DD or null",
   "due_date": "YYYY-MM-DD or null",
@@ -50,8 +53,6 @@ Return ONLY a valid JSON object with this schema (no explanation, no markdown):
     }
   ]
 }
-
-Document text:
 `
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
@@ -79,17 +80,46 @@ async function callGeminiWithRetry(
   throw new Error('Max retries exceeded')
 }
 
+export { callGeminiWithRetry }
+
 export async function extractInvoiceDataWithGemini(
-  text: string
+  text: string,
+  filePath?: string
 ): Promise<ExtractedInvoiceData> {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('GEMINI_API_KEY environment variable is not set')
 
   const genAI = new GoogleGenerativeAI(apiKey)
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+  // gemini-2.5-pro: better accuracy for complex document layouts and table extraction
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro' })
 
-  const prompt = EXTRACTION_PROMPT + text.slice(0, 12000)
-  const rawText = await callGeminiWithRetry(model, prompt)
+  let promptParts: string | any[]
+
+  // Multimodal: send the original file alongside text for better structure understanding
+  if (filePath && fs.existsSync(filePath)) {
+    try {
+      const fileData = fs.readFileSync(filePath)
+      const base64 = fileData.toString('base64')
+      const ext = filePath.toLowerCase()
+      const mimeType = ext.endsWith('.png') ? 'image/png'
+        : ext.endsWith('.jpg') || ext.endsWith('.jpeg') ? 'image/jpeg'
+        : 'application/pdf'
+
+      promptParts = [
+        { inlineData: { data: base64, mimeType } },
+        EXTRACTION_PROMPT + (text.length > 100
+          ? `\n\nExtracted text for reference (may have lost formatting):\n${text.slice(0, 8000)}`
+          : ''),
+      ]
+    } catch {
+      // Fall back to text-only if file read fails
+      promptParts = EXTRACTION_PROMPT + text.slice(0, 12000)
+    }
+  } else {
+    promptParts = EXTRACTION_PROMPT + text.slice(0, 12000)
+  }
+
+  const rawText = await callGeminiWithRetry(model, promptParts)
 
   const jsonStr = rawText
     .replace(/^```json\s*/i, '')
@@ -107,8 +137,6 @@ export async function extractInvoiceDataWithGemini(
 
   return validateAndClean(parsed)
 }
-
-export { callGeminiWithRetry }
 
 function validateAndClean(data: ExtractedInvoiceData): ExtractedInvoiceData {
   let totalAmount = typeof data.total_amount === 'number' ? data.total_amount : null
@@ -128,6 +156,7 @@ function validateAndClean(data: ExtractedInvoiceData): ExtractedInvoiceData {
 
   return {
     vendor_name: typeof data.vendor_name === 'string' ? data.vendor_name : null,
+    client_name: typeof data.client_name === 'string' ? data.client_name : null,
     invoice_number: typeof data.invoice_number === 'string' ? data.invoice_number : null,
     invoice_date: isValidDate(data.invoice_date) ? data.invoice_date : null,
     due_date: isValidDate(data.due_date) ? data.due_date : null,

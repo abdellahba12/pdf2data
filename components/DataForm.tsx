@@ -166,6 +166,7 @@ export default function DataForm({ documentId, initialData, initialClientId, onS
           <h3 className="text-xs font-bold text-ink uppercase tracking-widest mb-4 pb-2 border-b border-border">{t('invoiceDetails')}</h3>
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2"><Field label={t('vendorName')} value={data.vendor_name} onChange={(v) => setField('vendor_name', v)} /></div>
+            <div className="col-span-2"><Field label={t('clientName')} value={data.client_name} onChange={(v) => setField('client_name', v)} /></div>
             <Field label={t('invoiceNumber')} value={data.invoice_number} onChange={(v) => setField('invoice_number', v)} />
             <Field label={t('currency')} value={data.currency} onChange={(v) => setField('currency', v)} />
             <Field label={t('invoiceDate')} value={data.invoice_date} onChange={(v) => setField('invoice_date', v)} type="date" />

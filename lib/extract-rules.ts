@@ -6,6 +6,7 @@
 
 export interface PartialInvoiceData {
   vendor_name?: string | null
+  client_name?: string | null
   invoice_number?: string | null
   invoice_date?: string | null
   due_date?: string | null
@@ -166,15 +167,45 @@ export function extractWithRules(text: string): PartialInvoiceData {
 
   // === VENDOR NAME ===
   // Usually the first line or near CIF/NIF
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2)
   const cifMatch = text.match(/(?:CIF|NIF|C\.I\.F|N\.I\.F)[:\s]*([A-Z]\d{7,8}[A-Z]?)/i)
   if (cifMatch) {
     // Look for company name near CIF - usually the line before
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2)
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].match(/CIF|NIF/i) && i > 0) {
         const prevLine = lines[i - 1].trim()
         if (prevLine.length > 3 && prevLine.length < 80 && !prevLine.match(/factura|fecha|total|iva/i)) {
           result.vendor_name = prevLine
+          break
+        }
+      }
+    }
+  }
+
+  // === CLIENT NAME ===
+  // Look for explicit client labels
+  const clientPatterns = [
+    /(?:cliente|client|destinatario|facturar\s+a|bill\s+to|a\/a)[:\s]+(.+)/i,
+    /(?:nombre del cliente|razón social del cliente)[:\s]+(.+)/i,
+    /(?:datos del cliente|datos cliente)\s*\n+\s*(.+)/i,
+  ]
+  for (const re of clientPatterns) {
+    const m = text.match(re)
+    if (m) {
+      const candidate = m[1].trim().split('\n')[0].trim()
+      if (candidate.length > 2 && candidate.length < 100 && !candidate.match(/factura|fecha|total|iva|cif|nif/i)) {
+        result.client_name = candidate
+        break
+      }
+    }
+  }
+  // Fallback: look for "NIF del cliente" and grab the line before it
+  if (!result.client_name) {
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].match(/nif\s+del\s+cliente|cif\s+del\s+cliente/i) && i > 0) {
+        const prevLine = lines[i - 1].trim()
+        if (prevLine.length > 3 && prevLine.length < 80 && !prevLine.match(/factura|fecha|total|iva/i)) {
+          result.client_name = prevLine
           break
         }
       }

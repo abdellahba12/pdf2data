@@ -7,7 +7,7 @@ export interface Document {
 }
 export interface LineItem { description: string; quantity: number; unit_price: number; total: number }
 export interface ExtractedData {
-  vendor_name: string | null; invoice_number: string | null
+  vendor_name: string | null; client_name: string | null; invoice_number: string | null
   invoice_date: string | null; due_date: string | null
   total_amount: number | null; currency: string | null
   tax_amount: number | null; line_items: LineItem[]
