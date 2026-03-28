@@ -12,7 +12,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   if (!document) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   try {
     const fileBuffer = await downloadFile(document.fileUrl)
-    return new NextResponse(fileBuffer, {
+    return new NextResponse(new Uint8Array(fileBuffer), {
       headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline' },
     })
   } catch {

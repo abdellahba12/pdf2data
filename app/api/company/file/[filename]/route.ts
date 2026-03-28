@@ -33,7 +33,7 @@ export async function GET(request: NextRequest, { params }: { params: { filename
       '.xls': 'application/vnd.ms-excel',
     }
     const contentType = mimeTypes[ext] || 'application/octet-stream'
-    return new NextResponse(buffer, { headers: { 'Content-Type': contentType } })
+    return new NextResponse(new Uint8Array(buffer), { headers: { 'Content-Type': contentType } })
   } catch {
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
   }
