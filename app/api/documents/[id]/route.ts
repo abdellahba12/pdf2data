@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import { processDocument } from '@/lib/process'
-import { getFilePath } from '@/lib/pdf'
-import fs from 'fs'
+import { deleteFile } from '@/lib/storage'
 
 interface Params { params: { id: string } }
 
@@ -53,11 +52,8 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const document = await prisma.document.findFirst({ where: { id: params.id, userId: session.userId } })
   if (!document) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // Delete file from disk
-  try {
-    const filePath = getFilePath(document.fileUrl)
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
-  } catch (e) { console.error('Error deleting file:', e) }
+  // Delete file from R2
+  await deleteFile(document.fileUrl).catch((e) => console.error('Error deleting file from R2:', e))
 
   // Delete from database
   await prisma.document.delete({ where: { id: params.id } })

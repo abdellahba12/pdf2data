@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { writeFile } from 'fs/promises'
-import path from 'path'
 import { prisma } from '@/lib/db'
 import { getSession, canUploadDocument, incrementDocCounter, getNextInvoiceNumber } from '@/lib/auth'
-import { getUploadDir } from '@/lib/pdf'
+import { uploadFile } from '@/lib/storage'
 import { processDocument } from '@/lib/process'
 
 export async function POST(request: NextRequest) {
@@ -24,9 +22,8 @@ export async function POST(request: NextRequest) {
 
     const fileId = crypto.randomUUID()
     const storedName = `${fileId}.pdf`
-    const filePath = path.join(getUploadDir(), storedName)
-    const bytes = await blob.arrayBuffer()
-    await writeFile(filePath, Buffer.from(bytes))
+    const buffer = Buffer.from(await blob.arrayBuffer())
+    await uploadFile(buffer, storedName, 'application/pdf')
 
     const invoiceNumber = await getNextInvoiceNumber(session.userId)
     const document = await prisma.document.create({

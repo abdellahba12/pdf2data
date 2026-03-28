@@ -1,7 +1,10 @@
 import { prisma } from './db'
-import { extractTextFromPDF, getFilePath } from './pdf'
+import { extractTextFromPDF } from './pdf'
 import { extractInvoiceDataWithGemini, ExtractedInvoiceData } from './ai'
+import { extractInvoiceDataWithMistral } from './ai-mistral'
 import { extractWithRules, PartialInvoiceData } from './extract-rules'
+import { downloadToTemp } from './storage'
+import fs from 'fs'
 
 /** Merge rule-based data with AI data. Rules take priority when they have values. */
 function mergeData(rules: PartialInvoiceData, ai: ExtractedInvoiceData): ExtractedInvoiceData {
@@ -19,15 +22,18 @@ function mergeData(rules: PartialInvoiceData, ai: ExtractedInvoiceData): Extract
 }
 
 export async function processDocument(documentId: string): Promise<void> {
+  let tmpPath: string | null = null
   try {
     const document = await prisma.document.findUnique({ where: { id: documentId } })
     if (!document) throw new Error(`Document ${documentId} not found`)
 
     console.log(`Processing document: ${documentId} - ${document.fileName}`)
 
-    // Step 1: Extract text from PDF
-    const filePath = getFilePath(document.fileUrl)
-    const text = await extractTextFromPDF(filePath)
+    // Step 1: Download file from R2 to temp
+    tmpPath = await downloadToTemp(document.fileUrl)
+
+    // Step 2: Extract text from PDF
+    const text = await extractTextFromPDF(tmpPath)
 
     if (!text || text.length < 10) {
       await prisma.document.update({
@@ -42,30 +48,35 @@ export async function processDocument(documentId: string): Promise<void> {
 
     console.log(`Extracted ${text.length} characters from PDF`)
 
-    // Step 2: Rule-based extraction (fast, free, reliable)
+    // Step 3: Rule-based extraction (fast, free, reliable)
     const rulesData = extractWithRules(text)
     console.log('Rules extraction:', JSON.stringify(rulesData, null, 2))
 
-    // Step 3: AI extraction (multimodal: sends both text and original file for better accuracy)
+    // Step 4: AI extraction — try Mistral first, fall back to Gemini
     let aiData: ExtractedInvoiceData
     try {
-      aiData = await extractInvoiceDataWithGemini(text, filePath)
-      console.log('Gemini extraction:', JSON.stringify(aiData, null, 2))
-    } catch (error) {
-      console.error('Gemini failed, using rules only:', error)
-      // If Gemini fails (rate limit etc), use rules data only
-      aiData = {
-        vendor_name: null, client_name: null, invoice_number: null, invoice_date: null,
-        due_date: null, total_amount: null, currency: 'EUR',
-        tax_amount: null, line_items: [],
+      aiData = await extractInvoiceDataWithMistral(tmpPath)
+      console.log('Mistral extraction:', JSON.stringify(aiData, null, 2))
+    } catch (mistralError) {
+      console.error('Mistral failed, falling back to Gemini:', mistralError)
+      try {
+        aiData = await extractInvoiceDataWithGemini(text, tmpPath)
+        console.log('Gemini extraction:', JSON.stringify(aiData, null, 2))
+      } catch (geminiError) {
+        console.error('Gemini also failed, using rules only:', geminiError)
+        aiData = {
+          vendor_name: null, client_name: null, invoice_number: null, invoice_date: null,
+          due_date: null, total_amount: null, currency: 'EUR',
+          tax_amount: null, line_items: [],
+        }
       }
     }
 
-    // Step 4: Merge - rules data takes priority, AI fills gaps + provides line items
+    // Step 5: Merge — rules data takes priority, AI fills gaps + provides line items
     const finalData = mergeData(rulesData, aiData)
     console.log('Final merged data:', JSON.stringify(finalData, null, 2))
 
-    // Step 5: Save to database
+    // Step 6: Save to database
     await prisma.document.update({
       where: { id: documentId },
       data: { status: 'completed', extractedData: finalData as object, errorMessage: null },
@@ -81,5 +92,10 @@ export async function processDocument(documentId: string): Promise<void> {
         errorMessage: error instanceof Error ? error.message : 'Unknown processing error',
       },
     })
+  } finally {
+    // Always clean up temp file
+    if (tmpPath) {
+      try { fs.unlinkSync(tmpPath) } catch {}
+    }
   }
 }
